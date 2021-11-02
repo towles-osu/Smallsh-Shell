@@ -53,9 +53,10 @@ char *varExpand(char *word){
   char *resultStr = calloc(myStrLen(word) + 1, sizeof(char));
   strcpy(resultStr, word);
   char *tempStr;
-  char *pidStr = calloc(15, sizeof(char));
+  char pidStr[15] = ""; 
   pid_t myPid = getpid();
-  
+
+
   //manually converting int to string (couldn't get itoa to work)
   int count = 0;
   int digit;
@@ -97,6 +98,7 @@ char *varExpand(char *word){
     count++;
   }
 
+  count = count -1;
   //Now we invert pidStr since we wrote the digits in reverse order.
   int reverseCount = 0;
   char tempChar;
@@ -114,7 +116,7 @@ char *varExpand(char *word){
   char *varIndex = strstr(resultStr, "$$");
   while (varIndex){
     tempStr = calloc(myStrLen(resultStr) + lenPidStr + 1, sizeof(char));
-    for (int i = 0; i < (&varIndex - &tempStr); i++){
+    for (int i = 0; i < (varIndex - resultStr); i++){
       tempStr[i] = resultStr[i];
     }
     strcat(tempStr, pidStr);
@@ -126,7 +128,7 @@ char *varExpand(char *word){
     varIndex = strstr(resultStr, "$$");
   }
 
-  free(pidStr);
+
   return resultStr;
 }
 
@@ -365,8 +367,10 @@ int main(int argc, char *argv[]){
     //de-allocate memory for the input
     free(inputString);
     //de-allocate memory for the command
-    //WRITE THIS
-}
+    //May need to close up memory leaks in curCmd for the attributes
+    free(curCmd->name);
+    free(curCmd);
+  }
 
   return EXIT_SUCCESS;
 

@@ -261,6 +261,11 @@ struct cmdStruct *readCommand(char *inStr){
 	parsedCmd->name = calloc(myStrLen(curTok) + 1, sizeof(char));
 	strcpy(parsedCmd->name, curTok);
 	typeNextTok = 2;
+
+	//Also, make first option the name of the command for ease of exec functions
+	parsedCmd->options[parsedCmd->numOptions] = calloc (myStrLen(curTok) + 1, sizeof(char));
+	strcpy(parsedCmd->options[parsedCmd->numOptions], curTok);
+	parsedCmd->numOptions++;
       }
     } else if (typeNextTok == 2) {
 
@@ -363,7 +368,7 @@ int main(int argc, char *argv[]){
       char *curCwd = malloc(PATH_MAX);
       getcwd(curCwd, PATH_MAX);
      
-      if (curCmd->numOptions == 0) {
+      if (curCmd->numOptions == 1) {
 	//if no options then we change the working directory to the home directory
 	chdir(getenv("HOME"));
 
@@ -372,16 +377,16 @@ int main(int argc, char *argv[]){
 	//If we have options, we change to the first option as our cwd
 
 	//first, determine if the new path is absolute or relative
-	if (curCmd->options[0][0] == '/'){
+	if (curCmd->options[1][0] == '/'){
 	  //path is absolute
-	  chdir(curCmd->options[0]);
+	  chdir(curCmd->options[1]);
 	  
 	} else {
 	  //path is relative
-	  char *tempPath = calloc(myStrLen(curCwd) + myStrLen(curCmd->options[0]) + 2, sizeof(char));
+	  char *tempPath = calloc(myStrLen(curCwd) + myStrLen(curCmd->options[1]) + 2, sizeof(char));
 	  strcpy(tempPath, curCwd);
 	  strcat(tempPath, "/");
-	  strcat(tempPath, curCmd->options[0]);
+	  strcat(tempPath, curCmd->options[1]);
 	  chdir(tempPath);
 	  free(tempPath);
 	}
@@ -411,7 +416,36 @@ int main(int argc, char *argv[]){
       if (curCmd->fgOrBg == 1) {
 	
 	//The curCmd should be run in the foreground
+	//First, we setup where input and output should be read from based on if we have redirects
+	if (curCmd->inRedirect == 0) {
+	  //we are recieving redirected input
+	}
+	
+	//Initialize forking variables
+	int childStatus;
+	pid_t spawnPid = fork();
+	if (spawnPid == -1) {
+	  //failed fork, write error exit with 1
+	  perror("fork() failed");
+	  exit(1);
+	} else if (spawnPid == 0) {
+	  
+	  //We are in child process
 
+	  execvp(curCmd->options[0], curCmd->options);
+	  perror("execv failed");
+	  exit(1);
+	  break;
+	  
+	} else {
+	  //we are in the parent process
+	  spawnPid = waitpid(spawnPid, &childStatus, 0);
+	  curStatus = childStatus;
+	  printf("parent done");
+	  fflush(stdout);
+	  
+	}
+	
       } else {
 	
 	//the curCmd should be run in the background

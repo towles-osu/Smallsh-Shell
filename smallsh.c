@@ -19,6 +19,17 @@
 
 
 
+//------readCommand function------
+//This function is the top level function that gets called when we recieved a command
+
+int readCommand(char **cmndStr){
+  char outstr[3000];
+  strcpy(outstr, cmndStr);
+  strcat(outstr, " was your command");
+  write(STDOUT_FILENO, outstr, strlen(outstr));
+}
+
+
 
 
 
@@ -29,7 +40,19 @@
 
 
 int main(int argc, char *argv[]){
+  
+  int keepRunning = 1;
+  char *inputString = calloc(2049, sizeof(char));
 
+
+  //Main loop, will ask for a prompt by writing : and waiting for input
+  while (keepRunning == 1) {
+    write(STDOUT_FILENO, ":", 1);
+    
+    //NEED TO CHANGE THIS TO fgets I think.
+    read(STDIN_FILENO, &inputString, 2049 * sizeof(char));
+    readCommand( &inputString);
+  }
 
   return EXIT_SUCCESS;
 

@@ -92,6 +92,8 @@ char *intToStr(int num){
     myPid = myPid * -1;
   }
 
+  //Iterate through the number digit by digit copying the current last digit into the string
+  //and then removing the last digit by subtracting it and dividing by 10
   while (myPid != 0){
     digit = myPid % 10;
     switch (digit){
@@ -103,7 +105,7 @@ char *intToStr(int num){
       break;
     case 2:
       pidStr[count] = '2';
-      break;
+       break;
     case 3:
       pidStr[count] = '3';
       break;
@@ -137,18 +139,23 @@ char *intToStr(int num){
   if (num < 0) {
     reverseCount = 1;
   }
+
+  //Set tempChar to store the character that gets overwritten first as we reverse the string
   char tempChar;
-  while (count > reverseCount){
+  while (count > reverseCount){//We only need to iterate through half of the string since we are switching front and back correspondants
     tempChar = pidStr[count];
     pidStr[count] = pidStr[reverseCount];
     pidStr[reverseCount] = tempChar;
     reverseCount++;
     count = count -1;
   }
+
+  //Finally we copy the string into heap memory to be returned
   char *result = calloc(myStrLen(pidStr) + 1, sizeof(char));
   strcpy(result, pidStr);
   return result;
 }
+
 
 //--------sigintHandler function-------
 //This function is used by a child process killed by a SIGINT signal
@@ -157,7 +164,7 @@ void sigintHandler(int signum){
   //when this function is called we want to:
   //terminate the child process that is calling it
   //pass the number of the signal that killed this process back to the parent process
-  exit(signum);
+  exit(signum);//Exit both terminates the current process and returns the signum for us
 }
 
 
@@ -210,6 +217,7 @@ char *varExpand(char *word){
   //manually converting int to string (couldn't get itoa to work)
   //Later I wrote a helper function to do this, but to avoid having additional bugs come up
   //I left this hand written inline version in this function
+  //Also, I don't need to worry about the potential of converting negative numbers since Pid will always be positive
   int count = 0;
   int digit;
   while (myPid != 0){
@@ -261,24 +269,26 @@ char *varExpand(char *word){
     reverseCount++;
     count = count -1;
   }
-
+  //At this point pidStr is a string that is the pid, so we can use it to replace double dollar signs
 
   //Here we loop while there are "$$" in the source string and replace them with the pid string
   int lenPidStr = myStrLen(pidStr);
   char *varIndex = strstr(resultStr, "$$");
-  while (varIndex){
-    tempStr = calloc(myStrLen(resultStr) + lenPidStr + 1, sizeof(char));
+  while (varIndex){//If varIndex is not null the strstr found a "$$"
+    //Start by designating an area on the heap big enough to hold the result string with additional characters of pidStr
+    tempStr = calloc(myStrLen(resultStr) + lenPidStr + 1, sizeof(char));//This is slightly larger than it needs to be, but better safe than sorry
+
     for (int i = 0; i < (varIndex - resultStr); i++){
       tempStr[i] = resultStr[i];
     }//This for copies over the string up to the $$
     strcat(tempStr, pidStr);//This appends the pid
     strcat(tempStr, (varIndex + (2 * sizeof(char))));//this copies the rest of string after $$
-    free(resultStr);
+    free(resultStr);//Release the memory of resultStr, so we can then copy the tempStr in
     resultStr = calloc(myStrLen(tempStr) + 1, sizeof(char));
     strcpy(resultStr, tempStr);
-    free(tempStr);
+    free(tempStr);//We have copied into resultStr so we can release tempStr
     varIndex = strstr(resultStr, "$$");
-  }
+  }//loop will repeat if there are any more "$$" in resultStr
 
 
   return resultStr;
@@ -291,6 +301,7 @@ char *varExpand(char *word){
 //Its purpose is to create a cmdStruct that has all the info we need for determining how to handle the command
 
 struct cmdStruct *readCommand(char *inStr){
+  //Initialize and designate heap space for the cmdStruct, as well as declare our tokenizing variables
   struct cmdStruct *parsedCmd = malloc(sizeof(struct cmdStruct));
   char *savePtr;
   char *curTok = strtok_r(inStr, " \n", &savePtr);
@@ -300,10 +311,12 @@ struct cmdStruct *readCommand(char *inStr){
      2 means we are expecting options
      3 means we encountered "<"
      4 means we encountered ">"
-     5 means we encountered "&"
+     5 means we encountered "&" (5 as an option is not used in current version, but leaving this note if we reintroduce it later)
      6 means we have taken an input redirect and will only accept an output redirect or "&"
      7 means we have taken an output redirect and will only accept input redirection or "&"
   */
+  //SPECIAL NOTE: Our program will only allow one input redirect and one output redirect, but will not create an error
+  //if multiple are requested.  It will simply use the last instance of each.
 
   //Now we set default values of certain members of cmdStruct
   parsedCmd->fgOrBg = 1; //default to running in fg
@@ -317,13 +330,14 @@ struct cmdStruct *readCommand(char *inStr){
   while(curTok != NULL) {
     
     if (typeNextTok == 1) {
-      //We are reading in the command.
+      //We are reading in the primary command.
       if (curTok[0] == '#'){
 	break;//We just break out of the loop if comment and let comment catcher after loop deal with parsing
       } else {
 	//Need to replace any double $ with pid
 	curTok = varExpand(curTok);
 
+	//Store the name of the command we are running, and set typeNextTok to 2 so we read next vals as options
 	parsedCmd->name = calloc(myStrLen(curTok) + 1, sizeof(char));
 	strcpy(parsedCmd->name, curTok);
 	typeNextTok = 2;
@@ -336,6 +350,7 @@ struct cmdStruct *readCommand(char *inStr){
     } else if (typeNextTok == 2) {
 
       //Now we are reading options in
+      //Start by checking if our current option is one of the special symbols for redirection of bg process
       if (strcmp(curTok, "<") == 0 && (strcmp(parsedCmd->name, "exit") != 0 && strcmp(parsedCmd->name, "cd") != 0 
 				       && strcmp(parsedCmd->name, "status") != 0)) {//dont allow redirect for builtins
 	parsedCmd->inRedirect = 1;
@@ -357,6 +372,8 @@ struct cmdStruct *readCommand(char *inStr){
 	else {
 	
 	  //If the & is not at the end of the input then we get here, and treat it as a regular input argument
+	  //Note: token has already moved on so we add a "&" string literal, and continue so we dont increment
+	  //the token again, since we already incremented it to check if we are at the end.
 	  parsedCmd->options[parsedCmd->numOptions] = calloc(2, sizeof(char));
 	  strcpy(parsedCmd->options[parsedCmd->numOptions], "&");
 	  parsedCmd->numOptions++;
@@ -484,19 +501,21 @@ struct cmdStruct *readCommand(char *inStr){
 
 
 
-
 //------main function------
-
+//Main holds the shell loop, signal handling, declaration of bg process linked list
+//and the processing of commands.  It is a forking parent process that spawns child processes
+//when the commands given are not commands that we deal with in our custom functionality
+// by calling exec functions after forking.
 
 int main(int argc, char *argv[]){
   
-  //Define variable that will be used throughoutout
+  //Define variable that will be used throughout to determine if we should keep the shell running
   int keepRunning = 1;
-  //char *inputString = calloc(2049, sizeof(char));
-  char *inputString;
+  //Define the variables that all of main needs access to
+  char *inputString;//will store user inputs
   int forkedId;
-  struct cmdStruct *curCmd;
-  sigset_t signalSet;
+  struct cmdStruct *curCmd;//will store the parsed command structure based on user inputs
+  sigset_t signalSet;//Defining signal set to just include the signals that I accept
   sigemptyset(&signalSet);
   if (sigaddset(&signalSet, SIGINT) == -1){
     perror("failed to add SIGINT");
@@ -530,14 +549,15 @@ int main(int argc, char *argv[]){
 
   //Initialize variables for tracking bg processes
   struct bgProcessNode *headNode = malloc(sizeof(struct bgProcessNode));
+  //headNode will always point to our head sentinel so we can be sure to iterate through the whole list when we need
   headNode->processId = -1;
   headNode->nextNode = NULL;
-  struct bgProcessNode *curNode = malloc(sizeof(struct bgProcessNode));
-  struct bgProcessNode *prevNode = malloc(sizeof(struct bgProcessNode));
+  struct bgProcessNode *curNode = malloc(sizeof(struct bgProcessNode));//used to store current node when iterating
+  struct bgProcessNode *prevNode = malloc(sizeof(struct bgProcessNode));//used to store previous node when iterating
+  
+  //Also declare variable for monitoring child forking bg processes
   int bgChildStatus;
   pid_t bgChildPid;
-
-  //NEED TO INITIALIZE SIGNAL HANDLERS
 
 
   //Main loop, will ask for a prompt by writing : and waiting for input
@@ -545,17 +565,14 @@ int main(int argc, char *argv[]){
     {
     //allocate memory for the input
     inputString = calloc(2049, sizeof(char));//2049 to allow input stirngs of up to 2048 chars
-    //curCmd = malloc(sizeof(struct cmdStruct));
 
     //Reset curNode and iterate through nodes checking if bgProcess completed
     curNode = headNode;
     //bgChildStatus = 0;
     while(curNode->nextNode){
     //If there is a next node then check if that process is complete
-      //NEED TO FIGURE OUT HOW TO INITIALIZE child status appropriately
-      //bgChildStatus = NULL;
      
-      prevNode = curNode;
+      prevNode = curNode;//store curNode before going to next so we can set next of previous to currents next when deleting
       curNode = curNode->nextNode;
       bgChildPid = waitpid(curNode->processId, &bgChildStatus, WNOHANG);
       if(WIFEXITED(bgChildStatus) && bgChildPid > 0){
@@ -565,7 +582,7 @@ int main(int argc, char *argv[]){
         char *pidStrTemp = intToStr(bgChildPid);
         write(STDOUT_FILENO, pidStrTemp, myStrLen(pidStrTemp) + 1);
         write(STDOUT_FILENO, " is done: exit value ", 22);
-	free(pidStrTemp);
+	free(pidStrTemp);//need to make sure to free our strings so we dont have memory leaks
 	pidStrTemp = intToStr(bgChildStatus);
 	write(STDOUT_FILENO, pidStrTemp, myStrLen(pidStrTemp) + 1);
 	write(STDOUT_FILENO, "\n", 2);
@@ -636,8 +653,8 @@ int main(int argc, char *argv[]){
 	  chdir(curCmd->options[1]);
 	  
 	} else {
-	  //path is relative
-	  char *tempPath = calloc(myStrLen(curCwd) + myStrLen(curCmd->options[1]) + 2, sizeof(char));
+	  //path is relative, so we designate a heap pointer with enough space for the cwd and the relative path
+	  char *tempPath = calloc(myStrLen(curCwd) + myStrLen(curCmd->options[1]) + 2, sizeof(char));//+2 for extra "/" and null terminator
 	  strcpy(tempPath, curCwd);
 	  strcat(tempPath, "/");
 	  strcat(tempPath, curCmd->options[1]);
@@ -770,18 +787,9 @@ int main(int argc, char *argv[]){
 	    //At this point we should have successfully redirected standard out
 	  }
 
-	  //I think I am wrong about this, and th input redirect happens naturally somehow.....
-	  //Am removing for now
-	  /*
-	  if (curCmd->inRedirect == 1) {
-	    //if we have input redirect we dont want to use options to determine inputs
-	    execlp(curCmd->name, curCmd->name, NULL);//this should use our stdin stdout as set
-	  }
-	  else {
-	    //if we didnt have input redirect, options come from command struct
-	    execvp(curCmd->options[0], curCmd->options);
-	    }*/
+	  //Now we want to actually run the command using exec, passing our option array and the command
 	  execvp(curCmd->options[0], curCmd->options);
+	  //We will only get past the above call if there is an error
 	  perror("exec func failed");//writing error message
 	  exit(1);
 	  break;
@@ -815,9 +823,6 @@ int main(int argc, char *argv[]){
 	  else {
 	    curStatus = 1;
 	  }
-	  //printf("parent done");
-	  //fflush(stdout);
-	  
 	}
 	
       } else {//this is the else that means we need to run as bg process
@@ -906,7 +911,7 @@ int main(int argc, char *argv[]){
 	  }
 
 	  //I used to have different exec call for redirect or non-redirect, which would happen here
-	  //But believe that is unneccessary.  I leave this not about it though in case
+	  //But believe that is unneccessary.  I leave this note about it though in case
 	  //That is something I need to add back in later.
 
 	  //if we didnt have input redirect, we want the input to source from dev/null
@@ -939,7 +944,10 @@ int main(int argc, char *argv[]){
 	      exit(1);
 	    }
 	  }
+
+	  //This is where we actually call the command
 	  execvp(curCmd->options[0], curCmd->options);
+	  //we won't get here unless there is an error
 	  perror("exec func failed");//writing error message
 	  exit(1);
 	  break;
@@ -956,24 +964,16 @@ int main(int argc, char *argv[]){
 	  newNode->nextNode = NULL;
 	  curNode->nextNode = newNode;//Add the new node to our linked list of bg processes
 
-	 
+	  //Now we create our background process message using the spawnPid to know the child's pid
 	  char *tempStringedPid = intToStr(spawnPid);
 	  write(STDOUT_FILENO, "background pid is ", 19);
 	  write(STDOUT_FILENO, tempStringedPid, myStrLen(tempStringedPid) + 1);
 	  write(STDOUT_FILENO, "\n", 2);
 	  fflush(stdout);
 	  free(tempStringedPid);
-	  spawnPid = waitpid(spawnPid, &childStatus, WNOHANG);
-	  //NEED TO WRITE FOLLOWUP HERE PROBABLY
-	  /* We will deal with status results differently for WNOHANG
-	  if (childStatus != 0){
-	    curStatus = 1;
-	  }
-	  else {
-	    curStatus = 0;
-	  }*/
-	  
-
+	  //We dont use any sort of wait command because our shell checks for process termination
+	  //Before taking inputs and we are running the child in the bg so don't need to track its
+	  //results here.
 	}
 	
       }

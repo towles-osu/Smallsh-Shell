@@ -11,7 +11,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <dirent.h>
-#include <math.h>
+//#include <math.h>
 
 //may need to add an include of <time.h>, but don't think I need it.
 
@@ -21,18 +21,21 @@
 //Global variables
 //Cur status will always be an int that is the status of the most recent exit code of any process
 int curStatus = 0;
+int fgOnlyMode = 0;//This becomes 1 if we are in fg only mode, is 0 if not.
 
 
 //Defining structure for storing inputted commands
 struct cmdStruct {
   char *name;
   int numOptions;
-  char *options[512];
+  char *options[512];//option list, the first of which will be the command itself, and thus identitical to name
   int fgOrBg; //This should be 1 for foreground, 0 for backround
   int inRedirect; //This is 1 if there is an input redirect, otherwise 0
   int outRedirect; //this is 1 if there is an output redirect, otherwise 0
   char *inFilePath;
   char *outFilePath;
+  int validInput;//This should be 1 if the command is formatted correctly, and becomes 0 in certain
+                 // invalidly formatted input scenarios
 };
 
 
@@ -136,6 +139,10 @@ char *intToStr(int num){
 }
 
 
+//-------varExpand function-------
+//Description: This function take a string that should not have spaces in it (already split up by readCommand)
+//            and returns  a new string (which is on the heap) that has replaced any $$ with the PID
+
 char *varExpand(char *word){
   //This function returns a copy of the word string with $$ replaced with pid
   char *resultStr = calloc(myStrLen(word) + 1, sizeof(char));
@@ -209,7 +216,7 @@ char *varExpand(char *word){
     for (int i = 0; i < (varIndex - resultStr); i++){
       tempStr[i] = resultStr[i];
     }//This for copies over the string up to the $$
-    strcat(tempStr, pidStr);
+    strcat(tempStr, pidStr);//This appends the pid
     strcat(tempStr, (varIndex + (2 * sizeof(char))));//this copies the rest of string after $$
     free(resultStr);
     resultStr = calloc(myStrLen(tempStr) + 1, sizeof(char));
@@ -226,6 +233,7 @@ char *varExpand(char *word){
 
 //------readCommand function------
 //This function is the top level function that gets called when we recieved a command
+//Its purpose is to create a cmdStruct that has all the info we need for determining how to handle the command
 
 struct cmdStruct *readCommand(char *inStr){
   struct cmdStruct *parsedCmd = malloc(sizeof(struct cmdStruct));
@@ -238,6 +246,8 @@ struct cmdStruct *readCommand(char *inStr){
      3 means we encountered "<"
      4 means we encountered ">"
      5 means we encountered "&"
+     6 means we have taken an input redirect and will only accept an output redirect or "&"
+     7 means we have taken an output redirect and will only accept a "&"
   */
 
   //Now we set default values of certain members of cmdStruct
@@ -245,7 +255,7 @@ struct cmdStruct *readCommand(char *inStr){
   parsedCmd->numOptions = 0; //assumes no options to start with
   parsedCmd->inRedirect = 0; //assumed no input redirect until it encounters <
   parsedCmd->outRedirect = 0; //assumes no output redirect until it encounter >
-  
+  parsedCmd->validInput = 1;//Assumes the input will be valid, this is set to 0 if we parsed the input but find it invalid
 
   //Loop creating tokens for each space separated element of the input string
   while(curTok != NULL) {
@@ -290,7 +300,7 @@ struct cmdStruct *readCommand(char *inStr){
 	}
 	else {
 	
-	  //NEED TO WRITE conditional to determine if & is filepath for a redirect
+	  //If the & is not at the end of the input then we get here, and treat it as a regular input argument
 	  parsedCmd->options[parsedCmd->numOptions] = calloc(2, sizeof(char));
 	  strcpy(parsedCmd->options[parsedCmd->numOptions], "&");
 	  parsedCmd->numOptions++;
@@ -308,8 +318,76 @@ struct cmdStruct *readCommand(char *inStr){
 	strcpy(parsedCmd->options[parsedCmd->numOptions], curTok);
 	parsedCmd->numOptions++;
       }
-    }
+    } else if (typeNextTok == 3) {
+      //I am doing a varExpand on the token here, though I am a little unsure if that is what I should do
+      //based on the assignment description.  However, I chose to do it, in case someone does something like:
+      //make a file using $$ to give it a name with the PID of the parent process in it, and then later
+      //wants to redirect that files contents as the input for another command and wants to be able to 
+      //reference that file with the $$ to autofill as the PID.
+      curTok = varExpand(curTok);
+
+      //we are on a token that immediately follows a "<", so we want to store it as the inFilePath
+      parsedCmd->inFilePath = calloc(myStrLen(curTok) + 1, sizeof(char));//designate memory for file path
+      strcpy(parsedCmd->inFilePath, curTok); //copy over filepath
+      typeNextTok = 6;//Set to 6 designating that now we only accept output redirects or background trigger
+    } else if (typeNextTok == 4) {
+      //In this if scenario we have encountered the output redirect character
+      //First, for similar reason to in the if directly before this one, we varExpand any $$
+      curTok = varExpand(curTok);
+
+      //Then we copy the filePath into the outFilePath attribute
+      parsedCmd->outFilePath = calloc(myStrLen(curTok) + 1, sizeof(char));
+      strcpy(parsedCmd->outFilePath, curTok);
+      typeNextTok = 7;//Indicates only acceptable additional input is the "&" to designate bg process
+    } else if (typeNextTok == 6) {
+    //SPECIAL NOTE: I skip typeNextTok == 5 because it is not an actual potential state, since if we hit 
+    // a "&" before getting any in/out redirect symbols we will deal with it appropriately
+    //  in the if statement for typeNextTok ==2, otherwise, we will be arriving at it when typeNextTok
+    //  is either 6 or 7 (since it will be after an input or output redirect)
     
+      //Now we are in the scenario where we recieved an input redirection and already stored the filepath
+      //We want to check if there is output redirection or a run in background symbol
+      if (strcmp(curTok, ">") == 0) {
+	//Here we set boolean for output redirection and set typeNextTok to 4 to indicate we will read filepath
+	parsedCmd->outRedirect = 1;
+	typeNextTok = 4;
+      } else if (strcmp(curTok, "&") == 0) {
+	//this is the special case of when we hit an and-persand
+	//we want to just immediately check the value of what will be next to see if we have hit the end of input
+	curTok = strtok_r(NULL, " \n", &savePtr);
+	if (curTok == NULL){
+	  //If the & is the final character we set command to run in background
+	  parsedCmd -> fgOrBg = 0;
+	  break;
+	}
+	//if we hit an & but there are more commands after it, the user has entered improper input
+	//I could not find a clear indication of how the assignment wants us to handle this
+	//So I have chosen to use a field in cmdStruct to designate a general state of
+	//improrly formatted input and break from the command parsing loop
+	parsedCmd-> validInput = 0;
+	break;
+      }
+
+    } else if (typeNextTok == 7) {
+      
+      //Here we have had a output redirect and dealt with it, so the only valid value for the token
+      //now would be a "&" command to indicate run in bg
+      if(strcmp(curTok, "&") == 0) {
+	
+	//check that this is the final character by getting next token
+	curTok = strtok_r(NULL, " \n", &savePtr);
+	if(curTok == NULL) {
+	  parsedCmd-> fgOrBg = 0;
+	  break;
+	}
+      }
+      //if we get here then there are invalid input fields at the end of our input string
+      //So I indicate this with the validInput boolean in the parseCmd
+      parsedCmd-> validInput = 0;
+      break;
+    }
+
+
     curTok = strtok_r(NULL, " \n", &savePtr);
   }
 
@@ -317,6 +395,19 @@ struct cmdStruct *readCommand(char *inStr){
   if (typeNextTok == 1) {
     parsedCmd->name = calloc(2, sizeof(char));
     strcpy(parsedCmd->name, "#");//This means line was blank or a comment
+  }
+
+  //Deal with a scenario where we recieved a "<" input redirect symbol but nothing after it
+  if (typeNextTok == 3) {
+    //Currently we do nothing in this scenario except make the file name explicitly NULL
+    //This is so that if we set input redirect to true for this command we will be able to identify
+    //that no filepath was given when attempting to run the command with a redirect
+    parsedCmd->inFilePath = NULL;
+  }
+  
+  //Similarly, deal with scenario where we recieved a ">" without a filepath after
+  if (typeNextTok == 4) {
+    parsedCmd -> outFilePath = NULL;
   }
 
   return parsedCmd;
@@ -353,11 +444,12 @@ int main(int argc, char *argv[]){
     fgets(inputString, 2049, stdin); 
     curCmd = readCommand(inputString);
     
-    //just some testing code print statements
+    /* //just some testing code print statements
     char *testingStr = calloc(myStrLen(curCmd->name) + 18, sizeof(char));
     strcpy(testingStr, curCmd->name);
     strcat(testingStr, " was the command\n");
     write(STDOUT_FILENO, testingStr, myStrLen(testingStr) + 1);
+    */
 
     //Handling built-in commands
     if (strcmp(curCmd->name, "exit")==0){
@@ -416,14 +508,14 @@ int main(int argc, char *argv[]){
       if (curCmd->fgOrBg == 1) {
 	
 	//The curCmd should be run in the foreground
-	//First, we setup where input and output should be read from based on if we have redirects
-	if (curCmd->inRedirect == 0) {
-	  //we are recieving redirected input
-	}
-	
+	//This means we are either in fg only mode or the command was not requested to be run in bg
+
+
 	//Initialize forking variables
-	int childStatus;
+	int childStatus;//will use this to track status of child 
 	pid_t spawnPid = fork();
+
+
 	if (spawnPid == -1) {
 	  //failed fork, write error exit with 1
 	  perror("fork() failed");
@@ -431,18 +523,43 @@ int main(int argc, char *argv[]){
 	} else if (spawnPid == 0) {
 	  
 	  //We are in child process
+	  
+	  //We want to check if we need to do any input or output redirection
+	  //We want to do so before calling the command so that our filestreams are setup when the command runs
 
+	  if (curCmd->inRedirect == 1) {
+	    //We have a command that is attempting to redirect input from a file
+	    
+	    //Attempt to open the file, if it doesn't work we need to print and error message and update status
+	    //Though status updating will be handled by the parent process based on our exit code
+	    //since we are running in the foreground we don't need to have the filestream available to parent and child
+	    if (curCmd->inFilePath) {//check that there is actually a filePath to attempt to read from
+	      
+	    } else {
+	      //if there was no filepath then print error message and send exit status of 1
+	      perror("No filepath provided for input redirect");
+	      exit(1);
+	    }
+	    
+	    
+	  }
+	  
 	  execvp(curCmd->options[0], curCmd->options);
-	  perror("execv failed");
+	  perror("exec func failed");//writing error message
 	  exit(1);
 	  break;
 	  
 	} else {
 	  //we are in the parent process
 	  spawnPid = waitpid(spawnPid, &childStatus, 0);
-	  curStatus = childStatus;
-	  printf("parent done");
-	  fflush(stdout);
+	  if (childStatus != 0){
+	    curStatus = 1;
+	  }
+	  else {
+	    curStatus = 0;
+	  }
+	  //printf("parent done");
+	  //fflush(stdout);
 	  
 	}
 	

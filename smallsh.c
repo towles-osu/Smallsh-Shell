@@ -39,6 +39,12 @@ struct cmdStruct {
                  // invalidly formatted input scenarios
 };
 
+//Defining Linked List Node structure for storing bg processes
+struct bgProcessNode {
+    pid_t processId; //if this is -1 it is the head node, otherwise will be ID of a bg process
+    struct bgProcessNode nextNode;
+};
+
 
 
 //--------myStrLen function------
@@ -438,6 +444,13 @@ int main(int argc, char *argv[]){
   if (sigaddset(&signalSet, SIGTSTP) == -1){
     perror("failed to add SIGTSTP");
   }
+  struct bgProcessNode *headNode = malloc(sizeof(struct bgProcessNode));
+  headNode->processId = -1;
+  headNode->nextNode = NULL;
+  struct bgProcessNode *curNode = malloc(sizeof(struct bgProcessNode));
+  struct bgProcessNode *prevNode = malloc(sizeof(struct bgProcessNode));
+  int bgChildStatus;
+  pid_t bgChildPid;
 
   //NEED TO INITIALIZE SIGNAL HANDLERS
 
@@ -446,6 +459,29 @@ int main(int argc, char *argv[]){
   while (keepRunning == 1) {
     //allocate memory for the input
     inputString = calloc(2049, sizeof(char));//2049 to allow input stirngs of up to 2048 chars
+
+    //Reset curNode and iterate through nodes checking if bgProcess completed
+    curNode = headNode;
+    //bgChildStatus = 0;
+    while(curNode->nextNode){
+    //If there is a next node then check if that process is complete
+      bgChildStatus = NULL;
+	  prevNode = curNode;
+      curNode = curNode->nextNode;
+      bgChildPid = waitpid(curNode->processId, &bgChildStatus, WNOHANG);
+      WIFEXITED(bgChildStatus){
+        write(STDOUT_FILENO, "background pid ", 16);
+        char *pidStrTemp = intToStr(bgChildPid);
+        write(STDOUT_FILENO, pidStrTemp, myStrLen(pidStrTemp) + 1);
+        write(STDOUT_FILENO, " is done:\n", 11);
+        fflush(stdout);
+	    free(pidStrTemp);
+		prevNode->nextNode = curNode->nextNode;
+		free(curNode);
+        //NEED TO INCLUDE EXIT VALUE OR TERMINATION SIGNAL AS WELL
+      }
+    }
+
 
     write(STDOUT_FILENO, ":", 1);
     fflush(stdout);
@@ -627,6 +663,142 @@ int main(int argc, char *argv[]){
       } else {
 	
 	//the curCmd should be run in the background
+        //Initialize forking variables
+	int childStatus;//will use this to track status of child 
+	pid_t spawnPid = fork();
+
+
+	if (spawnPid == -1) {
+	  //failed fork, write error exit with 1
+	  perror("fork() failed");
+	  exit(1);
+	} else if (spawnPid == 0) {
+	  
+	  //We are in child process
+
+	  //First we will print the id of the background process
+	  write(STDOUT_FILENO, "background pid is ", 19);
+	  char *tempPidStr = intToStr(getpid());
+	  write(STDOUT_FILENO, tempPidStr, myStrLen(tempPidStr) + 1);
+	  free(tempPidStr);
+	  write(STDOUT_FILENO, "\n", 2);
+	  fflush(stdout);
+
+	
+	  //We want to check if we need to do any input or output redirection
+	  //We want to do so before calling the command so that our filestreams are setup when the command runs
+	  //We also need to declare our file variable out here so we have them outside the conditionals
+
+	  int sourceFD;
+	  int dupResult;
+	  int targetFD;
+	  int dupOutRes;
+	  //NOTE THIS: to disable redirects for testing purposes have added an impossible condition here
+	  if (curCmd->inRedirect == 1 && 1 == 2) {
+	    //We have a command that is attempting to redirect input from a file
+	    
+	    //Attempt to open the file, if it doesn't work we need to print and error message and update status
+	    //Though status updating will be handled by the parent process based on our exit code
+	    //since we are running in the foreground we don't need to have the filestream available to parent and child
+	    if (curCmd->inFilePath) {//check that there is actually a filePath to attempt to read from
+	      printf(curCmd -> inFilePath);
+	      fflush(stdout);
+	      //Now we attempt to read from the file path
+	      sourceFD = open(curCmd->inFilePath, O_RDONLY);
+	      if (sourceFD == -1) {
+		perror("cant read from file");
+		exit(1);
+	      }
+	      dupResult = dup2(sourceFD, 0);//Set the file as standard in's source
+	      if (dupResult == -1) {
+		//if this fails then print error and exit with 1
+		perror("dup2 error");
+		exit(1);
+	      }
+	    } else {
+	      //if there was no filepath then print error message and send exit status of 1
+	      perror("No filepath provided for input redirect");
+	      exit(1);
+	    }
+	    //At this point I belive we have succesfully redirected stdin to be from the file
+	  }
+
+	  //NOTE THIS: to disable redirects have added an impossible condition here
+	  if (curCmd->outRedirect == 1 && 1 == 2){
+	    //we have a command that is attempting to redirect output to file
+
+	    //process mirrors above process, start with checking file path exists
+	    if (curCmd->outFilePath) {
+	      
+	      //Now attempt to open file
+	      targetFD = open(curCmd->outFilePath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	      if (targetFD == -1) {
+		perror("cant write to file");
+		exit(1);
+	      }
+	      dupOutRes = dup2(targetFD, 1);
+	      if (dupOutRes == -1){
+		//error with dup2 on write
+		perror("dup2 error output redirect");
+		exit(1);
+	      }
+	    } else {
+	      //no filepath provided so error
+	      perror("No filepath provided for output redirect");
+	      exit(1);
+	    }
+	    //At this point we should have successfully redirected standard out
+	  }
+	  //NOTE THIS: disabled with impossible condition
+	  if (curCmd->inRedirect == 1 && 1 == 2) {
+	    //if we have input redirect we dont want to use options to determine inputs
+	    execlp(curCmd->name, curCmd->name, NULL);//this should use our stdin stdout as set
+	  }
+	  else {
+	    //if we didnt have input redirect, options come from command struct
+		sourceFD = open("/dev/null", O_RDONLY);
+		targetFD = open("dev/null", O_WRONLY, 0644);
+		if (sourceFD == -1 || targetFD == -1){
+			perror("couldnt set bg in/out to /dev/null");
+			exit(1);
+        }
+		dupResult = dup2(sourceFD, 0);
+		dupOutRes = dup2(targetFD, 0);
+		if (dupResult == -1 || dupOutRes == -1){
+			perror("issue with dup2 on bg process");
+
+        }
+	    execvp(curCmd->options[0], curCmd->options);
+	  }
+	  perror("exec func failed");//writing error message
+	  exit(1);
+	  break;
+	  
+	} else {
+	  //we are in the parent process
+	//We want to first add a node to our linked list of bg processes with this process's ID
+	  curNode = headNode;
+	  while (curNode->nextNode){
+		curNode = curNode->nextNode;
+      }
+	  struct bgProcessNode *newNode = malloc(sizeof(struct bgProcessNode));
+	  newNode->processId = spawnPid;
+	  newNode->nextNode = NULL;
+	  spawnPid = waitpid(spawnPid, &childStatus, WNOHANG);
+	  char *tempStringedPid = intToStr(spawnPid);
+	  write(STDOUT_FILENO, "background pid is ", 19);
+	  write(STDOUT_FILENO, tempStringedPid, myStrLen(tempStringedPid) + 1);
+	  fflush(stdout);
+	  free(tempStringedPid);
+	  /* We will deal with status results differently for WNOHANG
+	  if (childStatus != 0){
+	    curStatus = 1;
+	  }
+	  else {
+	    curStatus = 0;
+	  }*/
+	  
+
       }
 
     }

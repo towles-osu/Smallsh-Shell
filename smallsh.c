@@ -692,8 +692,8 @@ int main(int argc, char *argv[]){
 	  int dupResult;
 	  int targetFD;
 	  int dupOutRes;
-	  //NOTE THIS: to disable redirects for testing purposes have added an impossible condition here
-	  if (curCmd->inRedirect == 1 && 1 == 2) {
+
+	  if (curCmd->inRedirect == 1) {
 	    //We have a command that is attempting to redirect input from a file
 	    
 	    //Attempt to open the file, if it doesn't work we need to print and error message and update status
@@ -722,8 +722,7 @@ int main(int argc, char *argv[]){
 	    //At this point I belive we have succesfully redirected stdin to be from the file
 	  }
 
-	  //NOTE THIS: to disable redirects have added an impossible condition here
-	  if (curCmd->outRedirect == 1 && 1 == 2){
+	  if (curCmd->outRedirect == 1){
 	    //we have a command that is attempting to redirect output to file
 
 	    //process mirrors above process, start with checking file path exists
@@ -748,27 +747,42 @@ int main(int argc, char *argv[]){
 	    }
 	    //At this point we should have successfully redirected standard out
 	  }
-	  //NOTE THIS: disabled with impossible condition
-	  if (curCmd->inRedirect == 1 && 1 == 2) {
-	    //if we have input redirect we dont want to use options to determine inputs
-	    execlp(curCmd->name, curCmd->name, NULL);//this should use our stdin stdout as set
-	  }
-	  else {
-	    //if we didnt have input redirect, options come from command struct
-		sourceFD = open("/dev/null", O_RDONLY);
-		targetFD = open("/dev/null", O_WRONLY, 0644);
-		if (sourceFD == -1 || targetFD == -1){
-			perror("couldnt set bg in/out to /dev/null");
-			exit(1);
-		}
-		dupResult = dup2(sourceFD, 0);
-		dupOutRes = dup2(targetFD, 1);
-		if (dupResult == -1 || dupOutRes == -1){
-			perror("issue with dup2 on bg process");
 
-		}
-		execvp(curCmd->options[0], curCmd->options);
+	  //I used to have different exec call for redirect or non-redirect, which would happen here
+	  //But believe that is unneccessary.  I leave this not about it though in case
+	  //That is something I need to add back in later.
+
+	  //if we didnt have input redirect, we want the input to source from dev/null
+	  //so we aren't reading anything from the fg processes
+	  if (curCmd->inRedirect == 0){
+	    sourceFD = open("/dev/null", O_RDONLY);
+	    if (sourceFD == -1){
+	      perror("couldnt set bg input redirect to /dev/null");
+	      exit(1);
+	    }
+	    dupResult = dup2(sourceFD, 0);
+	    if (dupResult == -1){
+	      perror("dup2 issue bg /dev/null input redirect");
+	      exit(1);
+	    }
 	  }
+
+	  //if we didnt have output redirect, then we want to redirect out to dev/null
+	  //So that we dont have output from bg process in terminal
+	  if (curCmd->outRedirect == 0){
+	    targetFD = open("/dev/null", O_WRONLY, 0644);
+	    if (targetFD == -1){
+	      perror("couldnt set bg out to /dev/null");
+	      exit(1);
+	    }
+		
+	    dupOutRes = dup2(targetFD, 1);
+	    if (dupOutRes == -1){
+	      perror("issue with dup2 on bg process");
+	      exit(1);
+	    }
+	  }
+	  execvp(curCmd->options[0], curCmd->options);
 	  perror("exec func failed");//writing error message
 	  exit(1);
 	  break;
@@ -808,8 +822,6 @@ int main(int argc, char *argv[]){
       }
     }
 
-    printf("deallocating memory in %d\n", getpid());
-    fflush(stdout);
     //de-allocate memory for the input
     free(inputString);
     //de-allocate memory for the command

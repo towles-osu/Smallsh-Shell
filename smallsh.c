@@ -599,7 +599,18 @@ int main(int argc, char *argv[]){
     //Handling built-in commands
     if (strcmp(curCmd->name, "exit")==0){
       keepRunning = 0;
-      //NEED TO ADD kill all child processes
+      //kill all child processes
+      curNode = headNode;
+      while(curNode->nextNode){
+	//loop while there are on completed child processes
+	prevNode = curNode;
+	curNode = curNode->nextNode;
+	//kill each child process with the kill command
+	kill(curNode->processId, SIGKILL);
+	free(prevNode);//free up the memory for each node, this is slightly unnecessary since the program will
+	               // free up all memory when it exits, but doing this just to be thorough
+	               // and to make the functionality more complete in case I want to use code later and change things
+      }
     } else if (strcmp(curCmd->name, "cd") == 0){
       //cd command
       char *curCwd = malloc(PATH_MAX);

@@ -435,7 +435,7 @@ int main(int argc, char *argv[]){
   //char *inputString = calloc(2049, sizeof(char));
   char *inputString;
   int forkedId;
-  struct cmdStruct *curCmd = malloc(sizeof(struct cmdStruct));
+  struct cmdStruct *curCmd;
   sigset_t signalSet;
   sigemptyset(&signalSet);
   if (sigaddset(&signalSet, SIGINT) == -1){
@@ -460,6 +460,7 @@ int main(int argc, char *argv[]){
     {
     //allocate memory for the input
     inputString = calloc(2049, sizeof(char));//2049 to allow input stirngs of up to 2048 chars
+    //curCmd = malloc(sizeof(struct cmdStruct));
 
     //Reset curNode and iterate through nodes checking if bgProcess completed
     curNode = headNode;
@@ -485,21 +486,14 @@ int main(int argc, char *argv[]){
       }
     }
 
-
+    //Display the prompt colon.
     write(STDOUT_FILENO, ":", 1);
     fflush(stdout);
     
-    //NEED TO CHANGE THIS TO fgets I think.
-    //read(STDIN_FILENO, &inputString, 2049 * sizeof(char));
+    //Get user input and process it into a command structure.
     fgets(inputString, 2049, stdin); 
     curCmd = readCommand(inputString);
     
-    /* //just some testing code print statements
-    char *testingStr = calloc(myStrLen(curCmd->name) + 18, sizeof(char));
-    strcpy(testingStr, curCmd->name);
-    strcat(testingStr, " was the command\n");
-    write(STDOUT_FILENO, testingStr, myStrLen(testingStr) + 1);
-    */
 
     //Handling built-in commands
     if (strcmp(curCmd->name, "exit")==0){
@@ -544,7 +538,7 @@ int main(int argc, char *argv[]){
       fflush(stdout);
       free(strStat);
 
-    } else {
+    } else {//Split off for non-built-ins
       
       //We have gotten a command that must be run with exec funciton.
       
@@ -589,8 +583,8 @@ int main(int argc, char *argv[]){
 	    //Though status updating will be handled by the parent process based on our exit code
 	    //since we are running in the foreground we don't need to have the filestream available to parent and child
 	    if (curCmd->inFilePath) {//check that there is actually a filePath to attempt to read from
-	      printf(curCmd -> inFilePath);
-	      fflush(stdout);
+	     
+	     
 	      //Now we attempt to read from the file path
 	      sourceFD = open(curCmd->inFilePath, O_RDONLY);
 	      if (sourceFD == -1) {
@@ -636,7 +630,10 @@ int main(int argc, char *argv[]){
 	    }
 	    //At this point we should have successfully redirected standard out
 	  }
-	  
+
+	  //I think I am wrong about this, and th input redirect happens naturally somehow.....
+	  //Am removing for now
+	  /*
 	  if (curCmd->inRedirect == 1) {
 	    //if we have input redirect we dont want to use options to determine inputs
 	    execlp(curCmd->name, curCmd->name, NULL);//this should use our stdin stdout as set
@@ -644,7 +641,8 @@ int main(int argc, char *argv[]){
 	  else {
 	    //if we didnt have input redirect, options come from command struct
 	    execvp(curCmd->options[0], curCmd->options);
-	  }
+	    }*/
+	  execvp(curCmd->options[0], curCmd->options);
 	  perror("exec func failed");//writing error message
 	  exit(1);
 	  break;
@@ -678,17 +676,6 @@ int main(int argc, char *argv[]){
 	} else if (spawnPid == 0) {
 	  
 	  //We are in child process
-
-	  //PROBABLY DELETE THIS Parent prints the id, not child
-	  /*
-	  //First we will print the id of the background process
-	  write(STDOUT_FILENO, "background pid is ", 19);
-	  char *tempPidStr = intToStr(getpid());
-	  write(STDOUT_FILENO, tempPidStr, myStrLen(tempPidStr) + 1);
-	  free(tempPidStr);
-	  write(STDOUT_FILENO, "\n", 2);
-	  fflush(stdout);
-	  */
 	
 	  //We want to check if we need to do any input or output redirection
 	  //We want to do so before calling the command so that our filestreams are setup when the command runs
@@ -706,8 +693,8 @@ int main(int argc, char *argv[]){
 	    //Though status updating will be handled by the parent process based on our exit code
 	    //since we are running in the foreground we don't need to have the filestream available to parent and child
 	    if (curCmd->inFilePath) {//check that there is actually a filePath to attempt to read from
-	      printf(curCmd -> inFilePath);
-	      fflush(stdout);
+
+
 	      //Now we attempt to read from the file path
 	      sourceFD = open(curCmd->inFilePath, O_RDONLY);
 	      if (sourceFD == -1) {
@@ -779,7 +766,7 @@ int main(int argc, char *argv[]){
 	  exit(1);
 	  break;
 	  
-	} else {
+	} else {//parent else
 	  //we are in the parent process
 	//We want to first add a node to our linked list of bg processes with this process's ID
 	  curNode = headNode;
@@ -812,26 +799,18 @@ int main(int argc, char *argv[]){
 	
       }
     }
-    //Handling any input or output redirection
-    //This is done in readCommand function, and values in our curCmd struct tell us if we need to do this
-
-    //Handling commands beyond the built-in ones
-    //WRITE THIS
-
-    //Handling foreground or background commands
-    //WRITE THIS
-    //Thoughts: Since we know if a command will be foreground or background after parsing curCmd
-    //  we can make this part of handling commands beyond the built-in ones since
-    // it is another forking condition?
-
-    //Signal interupt handling
-    //WRITE THIS
 
     //de-allocate memory for the input
     free(inputString);
     //de-allocate memory for the command
     //May need to close up memory leaks in curCmd for the attributes
     free(curCmd->name);
+    int clearCounter = 0;
+    while (clearCounter < curCmd->numOptions){
+      //Iterating through the options attribute to clear out any input options
+      free(curCmd->options[clearCounter]);
+      clearCounter++;
+    }
     free(curCmd);
     }
 

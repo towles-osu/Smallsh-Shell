@@ -302,7 +302,7 @@ struct cmdStruct *readCommand(char *inStr){
      4 means we encountered ">"
      5 means we encountered "&"
      6 means we have taken an input redirect and will only accept an output redirect or "&"
-     7 means we have taken an output redirect and will only accept a "&"
+     7 means we have taken an output redirect and will only accept input redirection or "&"
   */
 
   //Now we set default values of certain members of cmdStruct
@@ -311,7 +311,7 @@ struct cmdStruct *readCommand(char *inStr){
   parsedCmd->inRedirect = 0; //assumed no input redirect until it encounters <
   parsedCmd->outRedirect = 0; //assumes no output redirect until it encounter >
   parsedCmd->validInput = 1;//Assumes the input will be valid, this is set to 0 if we parsed the input but find it invalid
-  // parsedCmd->options = calloc(512, sizeof(char));
+
 
   //Loop creating tokens for each space separated element of the input string
   while(curTok != NULL) {
@@ -337,11 +337,11 @@ struct cmdStruct *readCommand(char *inStr){
 
       //Now we are reading options in
       if (strcmp(curTok, "<") == 0 && (strcmp(parsedCmd->name, "exit") != 0 && strcmp(parsedCmd->name, "cd") != 0 
-				       && strcmp(parsedCmd->name, "status"))) {
+				       && strcmp(parsedCmd->name, "status") != 0)) {//dont allow redirect for builtins
 	parsedCmd->inRedirect = 1;
 	typeNextTok = 3;
       } else if (strcmp(curTok, ">") == 0 && (strcmp(parsedCmd->name, "exit") != 0 && strcmp(parsedCmd->name, "cd") != 0 
-					      && strcmp(parsedCmd->name, "status"))){
+					      && strcmp(parsedCmd->name, "status") != 0)){//dont allow redirect for builtins
 	typeNextTok = 4;
 	parsedCmd->outRedirect = 1;
       } else if (strcmp(curTok, "&") == 0){
@@ -427,7 +427,7 @@ struct cmdStruct *readCommand(char *inStr){
     } else if (typeNextTok == 7) {
       
       //Here we have had a output redirect and dealt with it, so the only valid value for the token
-      //now would be a "&" command to indicate run in bg
+      //now would be a "&" command to indicate run in bg or an input redirect
       if(strcmp(curTok, "&") == 0) {
 	
 	//check that this is the final character by getting next token
@@ -436,11 +436,17 @@ struct cmdStruct *readCommand(char *inStr){
 	  parsedCmd-> fgOrBg = 0;
 	  break;
 	}
-      }
+      } else if (strcmp(curTok, "<") == 0){
+	//Now we know our next input will be an input redirect
+	parsedCmd->inRedirect = 1;
+	typeNextTok = 3;
+      } else {
+      
       //if we get here then there are invalid input fields at the end of our input string
       //So I indicate this with the validInput boolean in the parseCmd
       parsedCmd-> validInput = 0;
       break;
+      }
     }
 
 

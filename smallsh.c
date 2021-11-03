@@ -505,7 +505,7 @@ int main(int argc, char *argv[]){
 
       //then we will fork and call the exec
 
-      if (curCmd->fgOrBg == 1) {
+      if (curCmd->fgOrBg == 1 || fgOnlyMode == 1) {
 	
 	//The curCmd should be run in the foreground
 	//This means we are either in fg only mode or the command was not requested to be run in bg
@@ -526,7 +526,12 @@ int main(int argc, char *argv[]){
 	  
 	  //We want to check if we need to do any input or output redirection
 	  //We want to do so before calling the command so that our filestreams are setup when the command runs
+	  //We also need to declare our file variable out here so we have them outside the conditionals
 
+	  int sourceFD;
+	  int dupResult;
+	  int targetFD;
+	  int dupOutRes;
 	  if (curCmd->inRedirect == 1) {
 	    //We have a command that is attempting to redirect input from a file
 	    
@@ -534,17 +539,62 @@ int main(int argc, char *argv[]){
 	    //Though status updating will be handled by the parent process based on our exit code
 	    //since we are running in the foreground we don't need to have the filestream available to parent and child
 	    if (curCmd->inFilePath) {//check that there is actually a filePath to attempt to read from
-	      
+	      printf(curCmd -> inFilePath);
+	      fflush(stdout);
+	      //Now we attempt to read from the file path
+	      sourceFD = open(curCmd->inFilePath, O_RDONLY);
+	      if (sourceFD == -1) {
+		perror("cant read from file");
+		exit(1);
+	      }
+	      dupResult = dup2(sourceFD, 0);//Set the file as standard in's source
+	      if (dupResult == -1) {
+		//if this fails then print error and exit with 1
+		perror("dup2 error");
+		exit(1);
+	      }
 	    } else {
 	      //if there was no filepath then print error message and send exit status of 1
 	      perror("No filepath provided for input redirect");
 	      exit(1);
 	    }
-	    
-	    
+	    //At this point I belive we have succesfully redirected stdin to be from the file
+	  }
+
+	  if (curCmd->outRedirect == 1){
+	    //we have a command that is attempting to redirect output to file
+
+	    //process mirrors above process, start with checking file path exists
+	    if (curCmd->outFilePath) {
+	      
+	      //Now attempt to open file
+	      targetFD = open(curCmd->outFilePath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	      if (targetFD == -1) {
+		perror("cant write to file");
+		exit(1);
+	      }
+	      dupOutRes = dup2(targetFD, 1);
+	      if (dupOutRes == -1){
+		//error with dup2 on write
+		perror("dup2 error output redirect");
+		exit(1);
+	      }
+	    } else {
+	      //no filepath provided so error
+	      perror("No filepath provided for output redirect");
+	      exit(1);
+	    }
+	    //At this point we should have successfully redirected standard out
 	  }
 	  
-	  execvp(curCmd->options[0], curCmd->options);
+	  if (curCmd->inRedirect == 1) {
+	    //if we have input redirect we dont want to use options to determine inputs
+	    execlp(curCmd->name, curCmd->name, NULL);//this should use our stdin stdout as set
+	  }
+	  else {
+	    //if we didnt have input redirect, options come from command struct
+	    execvp(curCmd->options[0], curCmd->options);
+	  }
 	  perror("exec func failed");//writing error message
 	  exit(1);
 	  break;

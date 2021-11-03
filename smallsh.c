@@ -263,6 +263,7 @@ struct cmdStruct *readCommand(char *inStr){
   parsedCmd->inRedirect = 0; //assumed no input redirect until it encounters <
   parsedCmd->outRedirect = 0; //assumes no output redirect until it encounter >
   parsedCmd->validInput = 1;//Assumes the input will be valid, this is set to 0 if we parsed the input but find it invalid
+  // parsedCmd->options = calloc(512, sizeof(char));
 
   //Loop creating tokens for each space separated element of the input string
   while(curTok != NULL) {
@@ -417,6 +418,11 @@ struct cmdStruct *readCommand(char *inStr){
     parsedCmd -> outFilePath = NULL;
   }
 
+  //Finally, we have a strange error where options that were part of previous commands
+  //Seem to linger into to new commands somehow.  So we set the option at index
+  //numOptions to NULL so that the exec functions will know not to read any ghost options
+  parsedCmd->options[parsedCmd->numOptions] = NULL;
+
   return parsedCmd;
 }
 
@@ -477,7 +483,7 @@ int main(int argc, char *argv[]){
         write(STDOUT_FILENO, "background pid ", 16);
         char *pidStrTemp = intToStr(bgChildPid);
         write(STDOUT_FILENO, pidStrTemp, myStrLen(pidStrTemp) + 1);
-        write(STDOUT_FILENO, " is done\n", 11);
+        write(STDOUT_FILENO, " is done\n", 10);
         fflush(stdout);
 	free(pidStrTemp);
 	prevNode->nextNode = curNode->nextNode;
@@ -485,9 +491,10 @@ int main(int argc, char *argv[]){
         //NEED TO INCLUDE EXIT VALUE OR TERMINATION SIGNAL AS WELL
       }
     }
-
+    
+    
     //Display the prompt colon.
-    write(STDOUT_FILENO, ":", 1);
+    write(STDOUT_FILENO, ":", 2);
     fflush(stdout);
     
     //Get user input and process it into a command structure.
@@ -782,6 +789,7 @@ int main(int argc, char *argv[]){
 	  char *tempStringedPid = intToStr(spawnPid);
 	  write(STDOUT_FILENO, "background pid is ", 19);
 	  write(STDOUT_FILENO, tempStringedPid, myStrLen(tempStringedPid) + 1);
+	  write(STDOUT_FILENO, "\n", 2);
 	  fflush(stdout);
 	  free(tempStringedPid);
 	  spawnPid = waitpid(spawnPid, &childStatus, WNOHANG);
@@ -800,10 +808,11 @@ int main(int argc, char *argv[]){
       }
     }
 
+    printf("deallocating memory in %d\n", getpid());
+    fflush(stdout);
     //de-allocate memory for the input
     free(inputString);
     //de-allocate memory for the command
-    //May need to close up memory leaks in curCmd for the attributes
     free(curCmd->name);
     int clearCounter = 0;
     while (clearCounter < curCmd->numOptions){
@@ -811,6 +820,7 @@ int main(int argc, char *argv[]){
       free(curCmd->options[clearCounter]);
       clearCounter++;
     }
+
     free(curCmd);
     }
 

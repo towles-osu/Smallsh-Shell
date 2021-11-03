@@ -12,18 +12,23 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <signal.h>
-//#include <math.h>
 
-//may need to add an include of <time.h>, but don't think I need it.
+
 
 //------------Program Description--------------
-
+//This program is a homemade shell.  It has basic functionality, with handwritten status, exit and cd functions
+//The ability to call default shell function through exec calls
+//And some simple signal interupt functionality for ctrl-c on foreground processes terminating them
+// and ctrl-z or any SIGTSTP signal which will cause the terminal to enter or leave foreground only mode.
+// Also has functionality for input redirect with <, output redirect with >, and background command running
+// which happens by giving & as the final input to a command (but will not work if in fg only mode).
 
 //Global variables
 //Cur status will always be an int that is the status of the most recent exit code of any process
 int curStatus = 0;
 int fgOnlyMode = 0;//This becomes 1 if we are in fg only mode, is 0 if not.
-
+pid_t fgProcessId = 0;//Should be 0 unless we are currently running a process in the foreground
+//fgProcessId is how our SIGTSTP handler knows if it needs to wait for a process to finish.
 
 //Defining structure for storing inputted commands
 struct cmdStruct {
@@ -153,6 +158,38 @@ void sigintHandler(int signum){
   //terminate the child process that is calling it
   //pass the number of the signal that killed this process back to the parent process
   exit(signum);
+}
+
+
+//-------sigtstpHandler function-------
+//This function is called by shell when entering or leaving fg only mode with a SIGTSTP
+
+void sigtstpHandler(int signum){
+  //When this function gets called we know we are in the parent process that is running the shell
+  //We want to immediately display a message (or display it after the child fg process, which shoudl happend naturally)
+  //Then switch the current fg-only mode (so if on turn off, if off turn on)
+  if (fgOnlyMode == 0){
+    //we are currently not in fg only mode, so need to display message that we are going into it and go into it
+    //Before displaying the message though we want to wait for any fg process to finish
+    if (fgProcessId > 0){
+      int childStatus;
+      waitpid(fgProcessId, &childStatus, 0);
+    }
+    write(STDOUT_FILENO, "\nEntering foreground-only mode (& is now ignored)\n", 51);
+    fflush(stdout);
+    fgOnlyMode = 1;
+  } else if (fgOnlyMode == 1) {
+    //We are in fg only mode, so want to display message and get out of it
+    //Before displaying the message though we want to wait for any fg process to finish
+    if (fgProcessId > 0){
+      int childStatus;
+      waitpid(fgProcessId, &childStatus, 0);
+    }
+    write(STDOUT_FILENO, "\nExiting foreground-only mode\n", 31);
+    fflush(stdout);
+    fgOnlyMode = 0;
+  }
+
 }
 
 
@@ -476,6 +513,13 @@ int main(int argc, char *argv[]){
   //install the signal handler
   sigaction(SIGINT, &SIGINT_action, NULL);
   
+  //Now we set the handler to sigtstpHandler for SIGTSTP since this is parent process
+  //We will later set it to ignor anytime we are in a child process
+  struct sigaction SIGTSTP_action = {0};
+  SIGTSTP_action.sa_handler = sigtstpHandler;
+  sigfillset(&SIGTSTP_action.sa_mask);
+  SIGTSTP_action.sa_flags = 0;
+  sigaction(SIGTSTP, &SIGTSTP_action, NULL);
 
 
   //Initialize variables for tracking bg processes
@@ -509,15 +553,36 @@ int main(int argc, char *argv[]){
       curNode = curNode->nextNode;
       bgChildPid = waitpid(curNode->processId, &bgChildStatus, WNOHANG);
       if(WIFEXITED(bgChildStatus) && bgChildPid > 0){
-        write(STDOUT_FILENO, "background pid ", 16);
+        //Here we have exitted normally from a bg process
+	//want to display the info and the exit value
+	write(STDOUT_FILENO, "background pid ", 16);
         char *pidStrTemp = intToStr(bgChildPid);
         write(STDOUT_FILENO, pidStrTemp, myStrLen(pidStrTemp) + 1);
-        write(STDOUT_FILENO, " is done\n", 10);
+        write(STDOUT_FILENO, " is done: exit value ", 22);
+	free(pidStrTemp);
+	pidStrTemp = intToStr(bgChildStatus);
+	write(STDOUT_FILENO, pidStrTemp, myStrLen(pidStrTemp) + 1);
+	write(STDOUT_FILENO, "\n", 2);
         fflush(stdout);
 	free(pidStrTemp);
 	prevNode->nextNode = curNode->nextNode;
 	free(curNode);
-        //NEED TO INCLUDE EXIT VALUE OR TERMINATION SIGNAL AS WELL
+       
+      } else if (WIFSIGNALED(bgChildStatus) && bgChildPid > 0){
+	//Here we have exitted abnormally (probably by process being terminated)
+	//want to display a special message with pid and termination status
+	write(STDOUT_FILENO, "background pid ", 16);
+        char *pidStrTemp = intToStr(bgChildPid);
+        write(STDOUT_FILENO, pidStrTemp, myStrLen(pidStrTemp) + 1);
+        write(STDOUT_FILENO, " is done: terminated by signal ", 32);
+	free(pidStrTemp);
+	pidStrTemp = intToStr(bgChildStatus);
+	write(STDOUT_FILENO, pidStrTemp, myStrLen(pidStrTemp) + 1);
+	write(STDOUT_FILENO, "\n", 2);
+        fflush(stdout);
+	free(pidStrTemp);
+	prevNode->nextNode = curNode->nextNode;
+	free(curNode);
       }
     }
     
@@ -620,6 +685,10 @@ int main(int argc, char *argv[]){
 	  SIGINT_action.sa_handler = sigintHandler;
 	  //Re-installing to make sure it is updated
 	  sigaction(SIGINT, &SIGINT_action, NULL);
+	  
+	  //Now we need to set the handler for SIGTSTP to SIG_IGN
+	  SIGTSTP_action.sa_handler = SIG_IGN;
+	  sigaction(SIGTSTP, &SIGTSTP_action, NULL);
 
 	  //We want to check if we need to do any input or output redirection
 	  //We want to do so before calling the command so that our filestreams are setup when the command runs
@@ -702,11 +771,21 @@ int main(int argc, char *argv[]){
 	  
 	} else {
 	  //we are in the parent process
+	  //First we want to store the pid of the child to the fgProcessId variable
+	  //so that SIGTSTP will function correctly
+	  //Then we will wait on the child process completing
+	  fgProcessId = spawnPid;
 	  spawnPid = waitpid(spawnPid, &childStatus, 0);
-	  if (childStatus == 1 || childStatus < 0){//setting status to 1 for any regular error situation
-	    curStatus = 1;
+
+	  //Now we want to set fgProcessId back to 0 because child process is done
+	  fgProcessId = 0;
+	  if (childStatus == 0){//setting status to 0 if no error
+	    curStatus = 0;
 	  }
-	  else if (childStatus > 1) {//This means we have a signal interupt, need special message displayed
+	  else if (childStatus ==2 || childStatus == 3 || childStatus == 9 
+		   || childStatus == 15 || childStatus == 24
+		   || childStatus == 25) {//checking if it is any valid interupt signal that would terminate
+	    //If we got a valid interupt we want to display a termination message
 	    write(STDOUT_FILENO, "terminated by signal ", 22);
 	    char * tempNumStr = intToStr(childStatus);
 	    write(STDOUT_FILENO, tempNumStr, myStrLen(tempNumStr) + 1);
@@ -717,7 +796,7 @@ int main(int argc, char *argv[]){
 	    //So if we run our custom status command after this it will print the special termination message
 	  }
 	  else {
-	    curStatus = 0;
+	    curStatus = 1;
 	  }
 	  //printf("parent done");
 	  //fflush(stdout);
@@ -740,6 +819,11 @@ int main(int argc, char *argv[]){
 	  
 	  //We are in child process
 	
+	  //We need to update any signal handling, in this case just SIGTSTP
+	  //we set the handler for SIGTSTP to SIG_IGN
+	  SIGTSTP_action.sa_handler = SIG_IGN;
+	  sigaction(SIGTSTP, &SIGTSTP_action, NULL);
+
 	  //We want to check if we need to do any input or output redirection
 	  //We want to do so before calling the command so that our filestreams are setup when the command runs
 	  //We also need to declare our file variable out here so we have them outside the conditionals

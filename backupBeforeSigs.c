@@ -145,17 +145,6 @@ char *intToStr(int num){
   return result;
 }
 
-//--------sigintHandler function-------
-//This function is used by a child process killed by a SIGINT signal
-
-void sigintHandler(int signum){
-  //when this function is called we want to:
-  //terminate the child process that is calling it
-  //pass the number of the signal that killed this process back to the parent process
-  exit(signum);
-}
-
-
 
 //-------varExpand function-------
 //Description: This function take a string that should not have spaces in it (already split up by readCommand)
@@ -461,24 +450,6 @@ int main(int argc, char *argv[]){
   if (sigaddset(&signalSet, SIGTSTP) == -1){
     perror("failed to add SIGTSTP");
   }
-  
-  //The following code is based on the exploration for Signal Handling in Module 5
-  //Website: https://canvas.oregonstate.edu/courses/1830250/pages/exploration-signal-handling-api?module_item_id=21468881
-  struct sigaction SIGINT_action = {0};
-  //filling in structure
-  //Want to register ignore as the default action, and then register our special handler
-  //if we are in a child running in the fg
-  SIGINT_action.sa_handler = SIG_IGN;
-  //block all catchable signals while handling a SIGINT
-  sigfillset(&SIGINT_action.sa_mask);
-  //no flags set
-  SIGINT_action.sa_flags = 0;
-  //install the signal handler
-  sigaction(SIGINT, &SIGINT_action, NULL);
-  
-
-
-  //Initialize variables for tracking bg processes
   struct bgProcessNode *headNode = malloc(sizeof(struct bgProcessNode));
   headNode->processId = -1;
   headNode->nextNode = NULL;
@@ -565,25 +536,14 @@ int main(int argc, char *argv[]){
       }
       free(curCwd);
     } else if (strcmp(curCmd->name, "status") == 0) {
+      
       //status command has been called
-      if (curStatus < 2){
-	//if our status is not 2 or greater (which means a signal interrupt happened)
-	// then we want to just display a regular status message starting with exit value
-	write(STDOUT_FILENO, "exit value ", 12);
-	char* strStat = intToStr(curStatus);
-	write(STDOUT_FILENO, strStat, myStrLen(strStat) + 1);
-	write(STDOUT_FILENO, "\n", 2);
-	fflush(stdout);
-	free(strStat);
-      } else {//This means we had a signal interrupt
-	//We want to display the special message format of terminate by signal
-	write(STDOUT_FILENO, "terminated by signal ", 22);
-	char* strStat = intToStr(curStatus);
-	write(STDOUT_FILENO, strStat, myStrLen(strStat) + 1);
-	write(STDOUT_FILENO, "\n", 2);
-	fflush(stdout);
-	free(strStat);
-      }
+      write(STDOUT_FILENO, "exit value ", 12);
+      char* strStat = intToStr(curStatus);
+      write(STDOUT_FILENO, strStat, myStrLen(strStat) + 1);
+      write(STDOUT_FILENO, "\n", 2);
+      fflush(stdout);
+      free(strStat);
 
     } else {//Split off for non-built-ins
       
@@ -615,12 +575,6 @@ int main(int argc, char *argv[]){
 	  
 	  //We are in child process
 	  
-	  //First thing we do is change the handler for SIGINT to our sigintHandler function
-	  //So that a fg process can be killed with ctrl-c
-	  SIGINT_action.sa_handler = sigintHandler;
-	  //Re-installing to make sure it is updated
-	  sigaction(SIGINT, &SIGINT_action, NULL);
-
 	  //We want to check if we need to do any input or output redirection
 	  //We want to do so before calling the command so that our filestreams are setup when the command runs
 	  //We also need to declare our file variable out here so we have them outside the conditionals
@@ -703,18 +657,8 @@ int main(int argc, char *argv[]){
 	} else {
 	  //we are in the parent process
 	  spawnPid = waitpid(spawnPid, &childStatus, 0);
-	  if (childStatus == 1 || childStatus < 0){//setting status to 1 for any regular error situation
+	  if (childStatus != 0){
 	    curStatus = 1;
-	  }
-	  else if (childStatus > 1) {//This means we have a signal interupt, need special message displayed
-	    write(STDOUT_FILENO, "terminated by signal ", 22);
-	    char * tempNumStr = intToStr(childStatus);
-	    write(STDOUT_FILENO, tempNumStr, myStrLen(tempNumStr) + 1);
-	    write(STDOUT_FILENO, "\n", 2);
-	    fflush(stdout);
-	    free(tempNumStr);
-	    curStatus = childStatus;//Here we set the current status, which will be greater than 1
-	    //So if we run our custom status command after this it will print the special termination message
 	  }
 	  else {
 	    curStatus = 0;

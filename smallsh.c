@@ -42,7 +42,7 @@ struct cmdStruct {
 //Defining Linked List Node structure for storing bg processes
 struct bgProcessNode {
     pid_t processId; //if this is -1 it is the head node, otherwise will be ID of a bg process
-    struct bgProcessNode nextNode;
+    struct bgProcessNode *nextNode;
 };
 
 
@@ -456,7 +456,8 @@ int main(int argc, char *argv[]){
 
 
   //Main loop, will ask for a prompt by writing : and waiting for input
-  while (keepRunning == 1) {
+  while (keepRunning == 1)
+    {
     //allocate memory for the input
     inputString = calloc(2049, sizeof(char));//2049 to allow input stirngs of up to 2048 chars
 
@@ -465,19 +466,21 @@ int main(int argc, char *argv[]){
     //bgChildStatus = 0;
     while(curNode->nextNode){
     //If there is a next node then check if that process is complete
-      bgChildStatus = NULL;
-	  prevNode = curNode;
+      //NEED TO FIGURE OUT HOW TO INITIALIZE child status appropriately
+      //bgChildStatus = NULL;
+     
+      prevNode = curNode;
       curNode = curNode->nextNode;
       bgChildPid = waitpid(curNode->processId, &bgChildStatus, WNOHANG);
-      WIFEXITED(bgChildStatus){
+      if(WIFEXITED(bgChildStatus) && bgChildPid > 0){
         write(STDOUT_FILENO, "background pid ", 16);
         char *pidStrTemp = intToStr(bgChildPid);
         write(STDOUT_FILENO, pidStrTemp, myStrLen(pidStrTemp) + 1);
-        write(STDOUT_FILENO, " is done:\n", 11);
+        write(STDOUT_FILENO, " is done\n", 11);
         fflush(stdout);
-	    free(pidStrTemp);
-		prevNode->nextNode = curNode->nextNode;
-		free(curNode);
+	free(pidStrTemp);
+	prevNode->nextNode = curNode->nextNode;
+	free(curNode);
         //NEED TO INCLUDE EXIT VALUE OR TERMINATION SIGNAL AS WELL
       }
     }
@@ -660,7 +663,7 @@ int main(int argc, char *argv[]){
 	  
 	}
 	
-      } else {
+      } else {//this is the else that means we need to run as bg process
 	
 	//the curCmd should be run in the background
         //Initialize forking variables
@@ -676,6 +679,8 @@ int main(int argc, char *argv[]){
 	  
 	  //We are in child process
 
+	  //PROBABLY DELETE THIS Parent prints the id, not child
+	  /*
 	  //First we will print the id of the background process
 	  write(STDOUT_FILENO, "background pid is ", 19);
 	  char *tempPidStr = intToStr(getpid());
@@ -683,7 +688,7 @@ int main(int argc, char *argv[]){
 	  free(tempPidStr);
 	  write(STDOUT_FILENO, "\n", 2);
 	  fflush(stdout);
-
+	  */
 	
 	  //We want to check if we need to do any input or output redirection
 	  //We want to do so before calling the command so that our filestreams are setup when the command runs
@@ -757,18 +762,18 @@ int main(int argc, char *argv[]){
 	  else {
 	    //if we didnt have input redirect, options come from command struct
 		sourceFD = open("/dev/null", O_RDONLY);
-		targetFD = open("dev/null", O_WRONLY, 0644);
+		targetFD = open("/dev/null", O_WRONLY, 0644);
 		if (sourceFD == -1 || targetFD == -1){
 			perror("couldnt set bg in/out to /dev/null");
 			exit(1);
-        }
+		}
 		dupResult = dup2(sourceFD, 0);
-		dupOutRes = dup2(targetFD, 0);
+		dupOutRes = dup2(targetFD, 1);
 		if (dupResult == -1 || dupOutRes == -1){
 			perror("issue with dup2 on bg process");
 
-        }
-	    execvp(curCmd->options[0], curCmd->options);
+		}
+		execvp(curCmd->options[0], curCmd->options);
 	  }
 	  perror("exec func failed");//writing error message
 	  exit(1);
@@ -780,16 +785,20 @@ int main(int argc, char *argv[]){
 	  curNode = headNode;
 	  while (curNode->nextNode){
 		curNode = curNode->nextNode;
-      }
+	  }
 	  struct bgProcessNode *newNode = malloc(sizeof(struct bgProcessNode));
 	  newNode->processId = spawnPid;
 	  newNode->nextNode = NULL;
-	  spawnPid = waitpid(spawnPid, &childStatus, WNOHANG);
+	  curNode->nextNode = newNode;//Add the new node to our linked list of bg processes
+
+	 
 	  char *tempStringedPid = intToStr(spawnPid);
 	  write(STDOUT_FILENO, "background pid is ", 19);
 	  write(STDOUT_FILENO, tempStringedPid, myStrLen(tempStringedPid) + 1);
 	  fflush(stdout);
 	  free(tempStringedPid);
+	  spawnPid = waitpid(spawnPid, &childStatus, WNOHANG);
+	  //NEED TO WRITE FOLLOWUP HERE PROBABLY
 	  /* We will deal with status results differently for WNOHANG
 	  if (childStatus != 0){
 	    curStatus = 1;
@@ -799,10 +808,10 @@ int main(int argc, char *argv[]){
 	  }*/
 	  
 
+	}
+	
       }
-
     }
-
     //Handling any input or output redirection
     //This is done in readCommand function, and values in our curCmd struct tell us if we need to do this
 
@@ -824,8 +833,8 @@ int main(int argc, char *argv[]){
     //May need to close up memory leaks in curCmd for the attributes
     free(curCmd->name);
     free(curCmd);
-  }
+    }
 
-  return EXIT_SUCCESS;
-
+    return EXIT_SUCCESS;
+    
 }

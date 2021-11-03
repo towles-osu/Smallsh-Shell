@@ -11,6 +11,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <dirent.h>
+#include <signal.h>
 //#include <math.h>
 
 //may need to add an include of <time.h>, but don't think I need it.
@@ -423,12 +424,22 @@ struct cmdStruct *readCommand(char *inStr){
 
 int main(int argc, char *argv[]){
   
+  //Define variable that will be used throughoutout
   int keepRunning = 1;
   //char *inputString = calloc(2049, sizeof(char));
   char *inputString;
   int forkedId;
   struct cmdStruct *curCmd = malloc(sizeof(struct cmdStruct));
-  
+  sigset_t signalSet;
+  sigemptyset(&signalSet);
+  if (sigaddset(&signalSet, SIGINT) == -1){
+    perror("failed to add SIGINT");
+  }
+  if (sigaddset(&signalSet, SIGTSTP) == -1){
+    perror("failed to add SIGTSTP");
+  }
+
+  //NEED TO INITIALIZE SIGNAL HANDLERS
 
 
   //Main loop, will ask for a prompt by writing : and waiting for input

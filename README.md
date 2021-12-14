@@ -1,6 +1,8 @@
 # OSAssignment3smallsh
 
-This is assignment 3, where we make a basic shell.  The following is the assignment description.  It is long.
+This is assignment 3, where we make a basic shell. To run my shell compile the smallsh.c with gnu99 c compiler.  Then run the executable without any inputs.  Designed to work Linux with Bash. 
+
+The following is the assignment description.  It is long:
 
 
 Introduction
